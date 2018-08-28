@@ -1,0 +1,362 @@
+<html>
+    <head>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.3.1/dist/leaflet.css" integrity="sha512-Rksm5RenBEKSKFjgI3a41vrjkw4EVPlJ3+OiI65vTjIdo9brlAacEuKOiQ5OFh7cOI1bkDwLqdLw3Zg0cRJAAQ==" crossorigin="" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.4/leaflet.js"></script>
+        <script src="crimedata.json"></script>
+        <script type="application/javascript" src="https://cdn.rawgit.com/Leaflet/Leaflet.heat/gh-pages/dist/leaflet-heat.js"></script>
+        <script type="application/javascript" src="https://cdn.rawgit.com/pa7/heatmap.js/master/build/heatmap.min.js"></script>
+        <script type="application/javascript" src="https://cdn.rawgit.com/pa7/heatmap.js/develop/plugins/leaflet-heatmap/leaflet-heatmap.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm//vega@3.3.1"></script>
+        <script src="https://cdn.jsdelivr.net/npm//vega-lite@2.4.3"></script>
+        <script src="https://cdn.jsdelivr.net/npm//vega-embed@3.11"></script>
+        <style>
+            #container{
+                display: grid;
+                grid-template-areas: 
+                    "h h h h h h h" 
+                    "m m m m m m s" 
+                    "m m m m m m s" 
+                    "m m m m m m s" 
+                    "m m m m m m s" 
+                    "g g g g g g e" 
+                    "g g g g g g e" 
+                    "g g g g g g e" 
+                    "f f f f f f f";
+                grid-template-rows: 70px 1fr;
+                grid-template-columns: auto;
+                grid-column-gap: 5px;
+                grid-row-gap: 5px;
+                font-family: helvetica;
+                height: 100%;
+                width: 100%;    
+            }
+            #map{
+                grid-area: m;
+/*                height: calc(100%);*/
+            }
+            
+            
+/*
+            label:hover{
+                background-color: steelblue;
+            }
+*/
+            #select{
+                grid-area: s;
+                height: 100%;
+                font-family: helvetica;
+                font-size:10px;
+            }
+            
+            #selectcontent{
+                border: 50px solid black;
+                text-align: left;
+                padding: 10px;
+                overflow: auto;
+                margin-top: 0px;
+                background-color: cornsilk;
+            }
+            
+            #select div{
+                padding: 5px;
+                border: 2px solid transparent;
+                border-radius: 4px;
+            }
+            
+            #select label{
+                padding: 5px;
+                border: 2px solid transparent;
+            }
+            
+            #select label:hover{
+                background-color: steelblue;
+                border: 2px solid black;
+                border-radius: 4px;
+            }
+            #header{
+                grid-area: h;
+                text-align: center;
+            }
+            
+            #headercontent{
+                font-family: courier;
+                color: darkblue;
+                background-color: sandybrown;
+                border: 1px solid black;
+                border-radius: 2px;
+                text-shadow: 1px 1px white;
+            }
+            
+            #footer{
+                grid-area: f;
+                font-size: 12px;
+                height: 100%;
+                bottom: 0px;
+                text-align: center;
+                width: 100%;
+                background-color: yellow;
+            }
+            
+            #graph{
+                grid-area: g;
+                width: minmax(400px, 2fr);
+            }
+            
+            #vis{
+                max-width: 900px;
+                overflow: auto;
+            }
+            
+            .vega-actions a {
+                margin-right: 12px;
+                    color: #757575;
+                    font-weight: normal;
+                    font-size: 13px;
+                }
+            
+            .error {
+                color: red;
+            }
+        </style>
+    </head>
+    <body>
+        <div id='container'>
+            <div id='header'>
+                <div id='headercontent'>
+                    <h3>2016 Austin Crime Heatmap</h3>
+                </div>
+                <hr>
+            </div>
+        <div id='map'>
+        </div>
+        <div id='select'>
+            <div id='selectcontent'>
+                <h2>Filter Parameters</h2>
+                <hr>
+                <h3>Date Selection</h3>
+                <div><label>Start Date: <input id='startdate' type='date' value="2016-01-01" min="2016-01-01" max="2016-12-31"></label></div>
+                <div><label>Stop Date: <input id='enddate' type='date' value="2016-12-31" min="2016-01-01" max="2016-12-31"></label></div>
+                <hr>
+                <h3>NIBRS/UCR Offense Description</h3>
+                <div><label><h3 style='display: inline;'>Select All</h3> <input name='selectall' id='selectall' type='checkbox'></label></div>
+            </div>
+        </div>
+        <div id='graph'>
+            <div id='vis'></div>
+        </div>
+        <div id='footer'>&copy; Jason Baker 2018</div>
+        </div>
+        
+        
+        <script>
+
+
+var baseLayer = L.tileLayer(
+  'http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    attribution: '...',
+    maxZoom: 18
+  }
+);
+
+var cfg = {
+  // radius should be small ONLY if scaleRadius is true (or small radius is intended)
+  // if scaleRadius is false it will be the constant radius used in pixels
+  "radius": .01,
+  "maxOpacity": 0.5,
+    minOpacity: 0.01,
+  // scales the radius based on map zoom
+  "scaleRadius": true, 
+  // if set to false the heatmap uses the global maximum for colorization
+  // if activated: uses the data maximum within the current map boundaries 
+  //   (there will always be a red spot with useLocalExtremas true)
+  "useLocalExtrema": false,
+gradient:{0:'#000000',0.6:'rgb(233, 255, 0,0.01)',0.8:'rgb(238, 255, 0,1)',1.0:'rgb(255, 0, 25,1)'},
+  // which field name in your data represents the latitude - default "lat"
+  latField: 'lat',
+  // which field name in your data represents the longitude - default "lng"
+  lngField: 'long',
+  // which field name in your data represents the data value - default "value"
+//  valueField: 'count'
+};
+
+
+var heatmapLayer = new HeatmapOverlay(cfg);
+
+var map = new L.Map('map', {
+  center: new L.LatLng(30.3,-97.6),
+  zoom: 10,
+  layers: [baseLayer, heatmapLayer]
+});
+
+
+var startDate='2016-01-01'
+var endDate='2017-01-01'
+var startCats = [...new Set(df.map(item=>item["Highest NIBRS/UCR Offense Description"]))].sort();
+var selectedCats = [];
+            
+var df1 = [];
+
+
+var updateDf = function(){
+    df1 = df.filter(
+                record=>(selectedCats.includes(record["Highest NIBRS/UCR Offense Description"]))&&
+                (record["GO Report Date"]>=startDate)&&(record["GO Report Date"]<=endDate))
+}
+
+
+for(item of startCats){
+    var d=document.createElement('div');
+    var l=document.createElement('label');
+//    l.innerHTML=item;
+    var i=document.createElement('input')
+    i.className='queryselector';
+    i.type='checkbox';i.id=item;i.checked=false;i.value=item;
+    l.appendChild(i);
+    var s = document.createElement('span');s.innerHTML=item;
+    l.appendChild(s);
+    d.appendChild(l);
+    document.getElementById('selectcontent').appendChild(d)
+}
+            
+for(item of document.getElementsByClassName('queryselector')){
+    item.addEventListener('click',function(event){
+        var val=event.target.value;
+        console.log(val);
+        if(selectedCats.includes(val)){selectedCats=selectedCats.filter(item=>item!=val)}
+        else{selectedCats.push(val)};
+        selectedCats=selectedCats.sort();
+        if(document.getElementById(val).checked==false){
+            document.getElementById('selectall').checked=false
+        };
+        if(!startCats.map(name=>selectedCats.includes(name)).includes(false)){
+            document.getElementById('selectall').checked=true
+        };
+        updateDf();
+        updateChart();
+        heatmapLayer.setData({
+            min:0.01,
+            max:3,
+            data: df1
+        })
+    })
+}
+document.getElementById('startdate')
+    .addEventListener('change',function(event){
+    var val=event.target.value;
+    val=val==''?'2016-01-01':val;
+    startDate=val;
+    updateDf();
+    updateChart();
+    heatmapLayer.setData({
+    min:0.01,
+    max:3,
+    data: df1
+})})
+
+document.getElementById('enddate')
+    .addEventListener('change',function(event){
+    var val=event.target.value;
+    val=val==''?'2017-01-01':val;
+    endDate=val;
+    updateDf();
+    updateChart();
+    heatmapLayer.setData({
+    min:0.01,
+    max:3,
+    data: df1
+    })
+})
+
+
+
+document.getElementById('selectall').addEventListener("change",function(id){
+    chk=id.path[0].checked;
+    console.log(chk);
+    for(item of document.getElementsByClassName('queryselector')){
+        item.checked=chk};
+    if(chk){selectedCats=Array.from(startCats)}else{selectedCats=[]}
+    updateDf();
+    updateChart();
+    heatmapLayer.setData({
+        min:0.01,
+        max:3,
+        data: df1
+})
+})
+
+var testData = {
+    min:.01,
+  max: 5,
+  data: [],
+};
+heatmapLayer.setData(testData);
+//document.getElementById('changemap').addEventListener('click',function(event){
+//    heatmapLayer.setData({
+//        min:0.1,
+//  max: 2,
+//  data: df.slice(0,100)
+//})
+//}
+    var updateChart = function(){
+        var spec = {
+//            "config": {"view": {"width": 400, "height": 300}}, 
+                    "data": {"values": df1}, 
+                    "mark": "bar", 
+                    "encoding": {"color": {"type": "nominal", 
+                                           "field": "Highest NIBRS/UCR Offense Description"},
+                                 "column": {"type": "temporal", 
+                                            "field": "GO Report Date", 
+                                            "timeUnit": "yearmonth", 
+                                            "title": "2016 Crime by Month"}, 
+                                 "tooltip": [{"type": "ordinal", 
+                                              "field": "Highest NIBRS/UCR Offense Description",title:'Classification'}, 
+                                             {"type": "quantitative", "aggregate": "count", "field": "GO Primary Key:Q", "title": "Count"},
+                                             {"type":"temporal","field":'GO Report Date',"timeUnit":"yearmonth","title":"Month"}
+                                            ], 
+                                 "x": {"type": "ordinal", "field": "Highest NIBRS/UCR Offense Description",title:'Classification'}, 
+                                 "y": {"type": "quantitative", "aggregate": "count", "field": "GO Primary Key"}
+                                }, 
+                    "height": 120, "width":75,
+                    "$schema": "https://vega.github.io/schema/vega-lite/v2.4.3.json",
+                    autosize:'fit'};
+        var embed_opt = {"mode": "vega-lite"};
+        function showError(el, error){
+            el.innerHTML = ('<div class="error">'
+                            + '<p>JavaScript Error: ' + error.message + '</p>'
+                            + "<p>This usually means there's a typo in your chart specification. "
+                            + "See the javascript console for the full traceback.</p>"
+                            + '</div>');
+            throw error;
+        }
+        var el = document.getElementById('vis');
+        vegaEmbed("#vis", spec, embed_opt)
+          .catch(error => showError(el, error));
+    }
+    updateChart();
+
+//----------------------------------------------------
+// DEMO ENDS
+//----------------------------------------------------
+
+
+//----------------------------------------------------
+// DEMO ENDS
+//----------------------------------------------------
+//        var m = new L.map('map', {
+//            center: [30.3,-97.7],
+//            zoom: 10,
+//            layers: [tile]
+//            })
+        
+//         L.tileLayer('https://api.tiles.mapbox.com/v4/{id}/{z}/{x}/{y}.png?access_token=pk.eyJ1IjoibWFwYm94IiwiYSI6ImNpejY4NXVycTA2emYycXBndHRqcmZ3N3gifQ.rJcFIG214AriISLbB6B5aw', {
+//      maxZoom: 18,
+//      attribution: 'Map data &copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> contributors, ' +
+//        '<a href="https://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, ' +
+//        'Imagery © <a href="https://www.mapbox.com/">Mapbox</a>',
+//      id: 'mapbox.light'
+//    }).addTo(m);
+        
+        
+        </script>
+    </body>
+</html>
